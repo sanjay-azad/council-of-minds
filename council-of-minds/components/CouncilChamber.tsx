@@ -2,15 +2,73 @@
 
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Pause, Play, StopCircle, RotateCcw, Gavel, FastForward } from 'lucide-react';
+import { Pause, Play, RotateCcw, Gavel, FastForward, ThumbsUp, ThumbsDown, HelpCircle } from 'lucide-react';
 import { useDebateStore } from '@/lib/store';
 import { PERSONAS, DEBATING_PERSONAS } from '@/lib/personas';
 import { DebateMessage, TypingIndicator } from './DebateMessage';
+import { Stance } from '@/lib/types';
 import clsx from 'clsx';
 
 interface CouncilChamberProps {
   onContinueDebate?: () => void;
   onTriggerJudge?: () => void;
+}
+
+function StanceIcon({ stance }: { stance?: Stance }) {
+  if (!stance || stance === 'undecided') {
+    return <HelpCircle className="w-3 h-3 text-gray-500" />;
+  }
+  if (stance === 'for') {
+    return <ThumbsUp className="w-3 h-3 text-green-400" />;
+  }
+  return <ThumbsDown className="w-3 h-3 text-red-400" />;
+}
+
+function StanceMeter({ stances }: { stances: Record<string, { stance: Stance }> }) {
+  let forCount = 0;
+  let againstCount = 0;
+  let undecidedCount = 0;
+  
+  Object.values(stances).forEach(({ stance }) => {
+    if (stance === 'for') forCount++;
+    else if (stance === 'against') againstCount++;
+    else undecidedCount++;
+  });
+  
+  const total = forCount + againstCount + undecidedCount;
+  if (total === 0) return null;
+  
+  const forPercent = (forCount / total) * 100;
+  const againstPercent = (againstCount / total) * 100;
+  
+  return (
+    <div className="mb-6 p-4 rounded-xl bg-chamber-accent/30 border border-chamber-border">
+      <div className="flex justify-between text-sm mb-2">
+        <span className="text-green-400 font-medium">FOR ({forCount})</span>
+        <span className="text-gray-400">vs</span>
+        <span className="text-red-400 font-medium">AGAINST ({againstCount})</span>
+      </div>
+      <div className="h-3 rounded-full bg-gray-800 overflow-hidden flex">
+        <div 
+          className="h-full bg-gradient-to-r from-green-500 to-green-400 transition-all duration-500"
+          style={{ width: `${forPercent}%` }}
+        />
+        <div 
+          className="h-full bg-gray-600"
+          style={{ width: `${100 - forPercent - againstPercent}%` }}
+        />
+        <div 
+          className="h-full bg-gradient-to-r from-red-400 to-red-500 transition-all duration-500"
+          style={{ width: `${againstPercent}%` }}
+        />
+      </div>
+      {undecidedCount > 0 && (
+        <p className="text-xs text-gray-500 mt-2 text-center">
+          {undecidedCount} still undecided
+        </p>
+      )}
+    </div>
+  );
 }
 
 export function CouncilChamber({ onContinueDebate, onTriggerJudge }: CouncilChamberProps) {
@@ -21,7 +79,6 @@ export function CouncilChamber({ onContinueDebate, onTriggerJudge }: CouncilCham
     streamingContent,
     pauseDebate,
     resumeDebate,
-    endDebate,
     reset,
   } = useDebateStore();
 
@@ -30,31 +87,24 @@ export function CouncilChamber({ onContinueDebate, onTriggerJudge }: CouncilCham
   const [isUserScrolling, setIsUserScrolling] = useState(false);
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Check if user is near the bottom of the scroll container
   const isNearBottom = useCallback(() => {
     const container = messagesContainerRef.current;
     if (!container) return true;
-    const threshold = 100; // pixels from bottom
+    const threshold = 100;
     return container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
   }, []);
 
-  // Handle user scroll
   const handleScroll = useCallback(() => {
-    // Mark as user scrolling
     setIsUserScrolling(true);
     
-    // Clear any existing timeout
     if (scrollTimeoutRef.current) {
       clearTimeout(scrollTimeoutRef.current);
     }
     
-    // If user scrolls to bottom, re-enable auto-scroll
     if (isNearBottom()) {
       setIsUserScrolling(false);
     } else {
-      // Reset scrolling state after user stops scrolling for 1.5 seconds
       scrollTimeoutRef.current = setTimeout(() => {
-        // Only re-enable auto-scroll if they're near the bottom
         if (isNearBottom()) {
           setIsUserScrolling(false);
         }
@@ -62,21 +112,18 @@ export function CouncilChamber({ onContinueDebate, onTriggerJudge }: CouncilCham
     }
   }, [isNearBottom]);
 
-  // Auto-scroll only when not user scrolling and new content arrives
   useEffect(() => {
     if (!isUserScrolling && messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [currentDebate?.messages.length, isUserScrolling]);
 
-  // Auto-scroll for streaming content only if at bottom
   useEffect(() => {
     if (!isUserScrolling && streamingContent && messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [streamingContent, isUserScrolling]);
 
-  // Cleanup timeout on unmount
   useEffect(() => {
     return () => {
       if (scrollTimeoutRef.current) {
@@ -94,7 +141,7 @@ export function CouncilChamber({ onContinueDebate, onTriggerJudge }: CouncilCham
     <div className="flex flex-col lg:flex-row gap-6 w-full max-w-7xl mx-auto p-4">
       {/* Council Members Sidebar */}
       <motion.div
-        className="lg:w-64 flex-shrink-0"
+        className="lg:w-72 flex-shrink-0"
         initial={{ opacity: 0, x: -20 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ duration: 0.5 }}
@@ -102,7 +149,13 @@ export function CouncilChamber({ onContinueDebate, onTriggerJudge }: CouncilCham
         <h2 className="text-xl font-display font-bold text-gray-300 mb-4 px-2">
           The Council
         </h2>
-        <div className="grid grid-cols-4 lg:grid-cols-1 gap-2">
+        
+        {/* Stance Meter */}
+        {currentDebate.stances && (
+          <StanceMeter stances={currentDebate.stances} />
+        )}
+        
+        <div className="grid grid-cols-3 lg:grid-cols-1 gap-2">
           {/* Debating Personas */}
           {DEBATING_PERSONAS.map((personaId) => {
             const persona = PERSONAS[personaId];
@@ -110,6 +163,8 @@ export function CouncilChamber({ onContinueDebate, onTriggerJudge }: CouncilCham
               (m) => m.personaId === personaId
             ).length;
             const isActive = activePersona === personaId;
+            const stance = currentDebate.stances?.[personaId]?.stance;
+            const changedStance = currentDebate.stances?.[personaId]?.changedFrom;
 
             return (
               <motion.div
@@ -129,7 +184,7 @@ export function CouncilChamber({ onContinueDebate, onTriggerJudge }: CouncilCham
                 <div
                   className={clsx(
                     'w-10 h-10 rounded-full flex items-center justify-center text-xl',
-                    'border-2 transition-all duration-300'
+                    'border-2 transition-all duration-300 relative'
                   )}
                   style={{
                     borderColor: persona.color,
@@ -138,14 +193,40 @@ export function CouncilChamber({ onContinueDebate, onTriggerJudge }: CouncilCham
                   }}
                 >
                   {persona.avatar}
+                  {/* Stance indicator */}
+                  <div className={clsx(
+                    'absolute -bottom-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center',
+                    stance === 'for' && 'bg-green-500',
+                    stance === 'against' && 'bg-red-500',
+                    stance === 'undecided' && 'bg-gray-600'
+                  )}>
+                    <StanceIcon stance={stance} />
+                  </div>
                 </div>
                 <div className="hidden lg:block flex-1 min-w-0">
-                  <p
-                    className="text-sm font-medium truncate"
-                    style={{ color: persona.color }}
-                  >
-                    {persona.name}
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <p
+                      className="text-sm font-medium truncate"
+                      style={{ color: persona.color }}
+                    >
+                      {persona.name}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={clsx(
+                      'text-xs font-medium uppercase',
+                      stance === 'for' && 'text-green-400',
+                      stance === 'against' && 'text-red-400',
+                      stance === 'undecided' && 'text-gray-500'
+                    )}>
+                      {stance || 'undecided'}
+                    </span>
+                    {changedStance && (
+                      <span className="text-xs text-purple-400">
+                        (was {changedStance})
+                      </span>
+                    )}
+                  </div>
                   <p className="text-xs text-gray-500">
                     {messageCount} message{messageCount !== 1 ? 's' : ''}
                   </p>
@@ -154,7 +235,7 @@ export function CouncilChamber({ onContinueDebate, onTriggerJudge }: CouncilCham
             );
           })}
           
-          {/* The Judge - Special styling */}
+          {/* The Judge */}
           <motion.div
             className={clsx(
               'flex items-center gap-3 p-3 rounded-xl transition-all duration-300',
@@ -208,8 +289,11 @@ export function CouncilChamber({ onContinueDebate, onTriggerJudge }: CouncilCham
             <span className="px-3 py-1 rounded-full bg-blue-500/20 text-blue-400 text-sm font-medium">
               Round {currentDebate.round}
             </span>
+            <span className="px-2 py-1 rounded-full bg-purple-500/20 text-purple-400 text-xs">
+              {currentDebate.spokenThisRound?.length || 0}/6 spoken
+            </span>
             <span className="text-sm text-gray-400">
-              {currentDebate.messages.filter(m => !m.isVerdict).length} arguments
+              {currentDebate.messages.filter(m => !m.isVerdict).length} total arguments
             </span>
             <span
               className={clsx(

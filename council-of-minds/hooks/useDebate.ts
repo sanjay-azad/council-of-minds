@@ -2,7 +2,7 @@
 
 import { useCallback, useRef } from 'react';
 import { useDebateStore } from '@/lib/store';
-import { PersonaId, DebateMessage } from '@/lib/types';
+import { PersonaId, DebateMessage, Stance } from '@/lib/types';
 
 interface StreamEvent {
   type: 'persona_start' | 'content' | 'persona_complete' | 'persona_error' | 'round_complete' | 'verdict_complete' | 'error';
@@ -14,6 +14,13 @@ interface StreamEvent {
   round?: number;
   totalMessages?: number;
   isVerdict?: boolean;
+  stance?: Stance;
+  stanceChanged?: boolean;
+  previousStance?: Stance;
+  stances?: Record<PersonaId, { personaId: PersonaId; stance: Stance; changedFrom?: Stance }>;
+  spokenThisRound?: PersonaId[];
+  roundFullyComplete?: boolean;
+  remainingSpeakers?: PersonaId[];
 }
 
 export function useDebate() {
@@ -22,7 +29,7 @@ export function useDebate() {
   const streamingContentRef = useRef<string>('');
 
   const handleStreamEvent = useCallback((event: StreamEvent) => {
-    const { addMessage, setActivePersona, updateStreamingContent, setStatus, endDebate } = useDebateStore.getState();
+    const { addMessage, setActivePersona, updateStreamingContent, setStatus, endDebate, updateStance } = useDebateStore.getState();
     
     switch (event.type) {
       case 'persona_start':
@@ -41,7 +48,7 @@ export function useDebate() {
         break;
 
       case 'persona_complete':
-        console.log('✅ Persona complete:', event.personaId);
+        console.log('✅ Persona complete:', event.personaId, event.stance ? `[${event.stance.toUpperCase()}]` : '', event.stanceChanged ? '🔄 CHANGED' : '');
         if (event.personaId && event.messageId && event.fullContent) {
           const message: DebateMessage = {
             id: event.messageId,
@@ -50,8 +57,15 @@ export function useDebate() {
             timestamp: Date.now(),
             votes: { agree: 0, interesting: 0, disagree: 0 },
             isVerdict: event.isVerdict,
+            stance: event.stance,
+            stanceChanged: event.stanceChanged,
           };
           addMessage(message);
+          
+          // Update stance if provided
+          if (event.stance && event.personaId !== 'judge') {
+            updateStance(event.personaId, event.stance);
+          }
         }
         setActivePersona(null);
         streamingContentRef.current = '';
@@ -64,7 +78,12 @@ export function useDebate() {
         break;
 
       case 'round_complete':
-        console.log(`🏁 Round ${event.round} complete. Total messages: ${event.totalMessages}`);
+        if (event.roundFullyComplete) {
+          console.log(`🏁 Round ${event.round} COMPLETE - All 6 spoke! Moving to round ${(event.round || 1) + 1}`);
+        } else {
+          console.log(`⏳ ${event.remainingSpeakers?.length || 0} speakers remaining in round ${event.round}`);
+        }
+        // Stances are already updated via addMessage
         break;
         
       case 'verdict_complete':
@@ -79,7 +98,7 @@ export function useDebate() {
   }, []);
 
   const runDebateRound = useCallback(async (topicOverride?: string) => {
-    const { currentDebate, incrementRound } = useDebateStore.getState();
+    const { currentDebate } = useDebateStore.getState();
     
     const topic = topicOverride || currentDebate?.topic;
     
@@ -94,13 +113,11 @@ export function useDebate() {
 
     abortControllerRef.current = new AbortController();
 
-    // Increment round if this isn't the first round
-    if (currentDebate && currentDebate.messages.length > 0 && !topicOverride) {
-      incrementRound();
-    }
-
     const freshState = useDebateStore.getState();
+    const spokenThisRound = freshState.currentDebate?.spokenThisRound || [];
+    
     console.log('🚀 Starting debate round:', freshState.currentDebate?.round || 1);
+    console.log('📊 Already spoken this round:', spokenThisRound.join(', ') || 'none');
 
     try {
       const response = await fetch('/api/debate', {
@@ -110,8 +127,9 @@ export function useDebate() {
           topic: topic,
           messages: freshState.currentDebate?.messages || [],
           round: freshState.currentDebate?.round || 1,
-          maxResponses: 3,
           triggerJudge: false,
+          stances: freshState.currentDebate?.stances || {},
+          spokenThisRound: spokenThisRound,
         }),
         signal: abortControllerRef.current.signal,
       });
@@ -182,6 +200,7 @@ export function useDebate() {
           messages: currentDebate.messages,
           round: currentDebate.round,
           triggerJudge: true,
+          stances: currentDebate.stances,
         }),
         signal: abortControllerRef.current.signal,
       });
@@ -235,7 +254,7 @@ export function useDebate() {
   }, [store, runDebateRound]);
 
   const continueDebate = useCallback(() => {
-    const { currentDebate, isDebating } = useDebateStore.getState();
+    const { currentDebate } = useDebateStore.getState();
     if (currentDebate && currentDebate.status !== 'completed') {
       runDebateRound();
     }

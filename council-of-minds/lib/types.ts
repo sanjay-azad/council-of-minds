@@ -7,6 +7,8 @@ export type PersonaId =
   | 'empath'
   | 'analyst';
 
+export type Stance = 'for' | 'against' | 'undecided';
+
 export interface Persona {
   id: PersonaId;
   name: string;
@@ -33,6 +35,15 @@ export interface DebateMessage {
   isStreaming?: boolean;
   referencedMessages?: string[];
   isVerdict?: boolean;
+  stance?: Stance;
+  stanceChanged?: boolean;
+}
+
+export interface PersonaStance {
+  personaId: PersonaId;
+  stance: Stance;
+  reason?: string;
+  changedFrom?: Stance;
 }
 
 export interface Debate {
@@ -43,6 +54,8 @@ export interface Debate {
   round: number;
   createdAt: number;
   verdict?: string;
+  stances: Record<PersonaId, PersonaStance>;
+  spokenThisRound: PersonaId[];
 }
 
 export interface Vote {
@@ -69,6 +82,7 @@ export interface DebateState {
   addMessage: (message: DebateMessage) => void;
   updateStreamingContent: (content: string) => void;
   setActivePersona: (personaId: PersonaId | null) => void;
+  updateStance: (personaId: PersonaId, stance: Stance, reason?: string) => void;
   vote: (messageId: string, voteType: Vote['type']) => void;
   incrementRound: () => void;
   setStatus: (status: Debate['status']) => void;

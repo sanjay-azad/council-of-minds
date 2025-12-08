@@ -1,8 +1,8 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { ThumbsUp, Sparkles, ThumbsDown, Gavel } from 'lucide-react';
-import { DebateMessage as DebateMessageType, PersonaId } from '@/lib/types';
+import { ThumbsUp, Sparkles, ThumbsDown, Gavel, RefreshCw } from 'lucide-react';
+import { DebateMessage as DebateMessageType, PersonaId, Stance } from '@/lib/types';
 import { PERSONAS } from '@/lib/personas';
 import { PersonaAvatar } from './PersonaAvatar';
 import { useDebateStore } from '@/lib/store';
@@ -12,6 +12,22 @@ interface DebateMessageProps {
   message: DebateMessageType;
   isStreaming?: boolean;
   streamingContent?: string;
+}
+
+function StanceBadge({ stance, changed }: { stance?: Stance; changed?: boolean }) {
+  if (!stance || stance === 'undecided') return null;
+  
+  const isFor = stance === 'for';
+  
+  return (
+    <span className={clsx(
+      'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold uppercase',
+      isFor ? 'bg-green-500/20 text-green-400 border border-green-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30'
+    )}>
+      {changed && <RefreshCw className="w-3 h-3" />}
+      {stance}
+    </span>
+  );
 }
 
 export function DebateMessage({
@@ -75,7 +91,12 @@ export function DebateMessage({
 
   return (
     <motion.div
-      className="message-enter flex gap-4 p-4 rounded-xl bg-chamber-accent/30 border border-chamber-border hover:border-chamber-glow transition-colors"
+      className={clsx(
+        "message-enter flex gap-4 p-4 rounded-xl bg-chamber-accent/30 border hover:border-chamber-glow transition-colors",
+        message.stanceChanged 
+          ? "border-purple-500/50 bg-purple-900/10" 
+          : "border-chamber-border"
+      )}
       initial={{ opacity: 0, y: 20, scale: 0.95 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ duration: 0.4, ease: 'easeOut' }}
@@ -90,27 +111,25 @@ export function DebateMessage({
       </div>
 
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-2">
+        <div className="flex items-center gap-2 mb-2 flex-wrap">
           <span
             className="font-display font-semibold"
             style={{ color: persona.color }}
           >
             {persona.name}
           </span>
+          <StanceBadge stance={message.stance} changed={message.stanceChanged} />
+          {message.stanceChanged && (
+            <span className="text-xs text-purple-400 flex items-center gap-1">
+              <RefreshCw className="w-3 h-3" />
+              Changed position!
+            </span>
+          )}
           {isStreaming && (
             <span className="flex gap-1">
-              <span
-                className="typing-dot"
-                style={{ backgroundColor: persona.color }}
-              />
-              <span
-                className="typing-dot"
-                style={{ backgroundColor: persona.color }}
-              />
-              <span
-                className="typing-dot"
-                style={{ backgroundColor: persona.color }}
-              />
+              <span className="typing-dot" style={{ backgroundColor: persona.color }} />
+              <span className="typing-dot" style={{ backgroundColor: persona.color }} />
+              <span className="typing-dot" style={{ backgroundColor: persona.color }} />
             </span>
           )}
         </div>
@@ -234,18 +253,9 @@ export function TypingIndicator({ personaId }: { personaId: PersonaId }) {
           {isJudge ? 'The Judge is deliberating' : `${persona.name} is thinking`}
         </span>
         <span className="flex gap-1">
-          <span
-            className="typing-dot"
-            style={{ backgroundColor: persona.color }}
-          />
-          <span
-            className="typing-dot"
-            style={{ backgroundColor: persona.color }}
-          />
-          <span
-            className="typing-dot"
-            style={{ backgroundColor: persona.color }}
-          />
+          <span className="typing-dot" style={{ backgroundColor: persona.color }} />
+          <span className="typing-dot" style={{ backgroundColor: persona.color }} />
+          <span className="typing-dot" style={{ backgroundColor: persona.color }} />
         </span>
       </div>
     </motion.div>

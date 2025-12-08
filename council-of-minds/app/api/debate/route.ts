@@ -1,8 +1,8 @@
 import OpenAI from 'openai';
 import { NextRequest } from 'next/server';
-import { PersonaId, DebateMessage } from '@/lib/types';
-import { PERSONAS } from '@/lib/personas';
-import { buildPersonaPrompt, buildJudgePrompt, getNextSpeakers, DebateContext } from '@/lib/debate-orchestrator';
+import { PersonaId, DebateMessage, Stance, PersonaStance } from '@/lib/types';
+import { PERSONAS, DEBATING_PERSONAS } from '@/lib/personas';
+import { buildPersonaPrompt, buildJudgePrompt, getNextSpeakers, parseStanceFromMessage, DebateContext } from '@/lib/debate-orchestrator';
 import { nanoid } from 'nanoid';
 
 export const maxDuration = 60;
@@ -13,6 +13,8 @@ interface DebateRequest {
   round: number;
   maxResponses?: number;
   triggerJudge?: boolean;
+  stances?: Partial<Record<PersonaId, PersonaStance>>;
+  spokenThisRound?: PersonaId[];
 }
 
 export async function POST(req: NextRequest) {
@@ -29,27 +31,38 @@ export async function POST(req: NextRequest) {
     }
 
     const body: DebateRequest = await req.json();
-    const { topic, messages, round, maxResponses = 3, triggerJudge = false } = body;
+    const { topic, messages, round, triggerJudge = false, stances, spokenThisRound = [] } = body;
+
+    // Calculate how many speakers remain this round
+    const remainingThisRound = DEBATING_PERSONAS.filter(id => !spokenThisRound.includes(id));
+    const speakersNeeded = Math.min(3, remainingThisRound.length);
 
     console.log('📥 Debate request:', { 
       topic, 
       messageCount: messages.length, 
       round,
-      triggerJudge 
+      triggerJudge,
+      spokenThisRound: spokenThisRound.join(', ') || 'none',
+      remainingCount: remainingThisRound.length,
+      currentStances: stances ? Object.entries(stances).map(([id, s]) => `${id}: ${(s as PersonaStance).stance}`).join(', ') : 'none'
     });
 
-    const context: DebateContext = { topic, messages, round };
+    const context: DebateContext = { 
+      topic, 
+      messages, 
+      round, 
+      stances: stances || {},
+      spokenThisRound 
+    };
     const openai = new OpenAI({ apiKey });
 
     const stream = new ReadableStream({
       async start(controller) {
         let isClosed = false;
+        const newlySpoken: PersonaId[] = [];
         
         const sendEvent = (data: object) => {
-          if (isClosed) {
-            console.log('⚠️ Attempted to send event after stream closed');
-            return;
-          }
+          if (isClosed) return;
           try {
             controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
           } catch (e) {
@@ -71,7 +84,7 @@ export async function POST(req: NextRequest) {
 
         try {
           if (triggerJudge) {
-            // JUDGE MODE: Deliver final verdict
+            // JUDGE MODE
             console.log('⚖️ The Judge is preparing the verdict...');
             
             const { system, user } = buildJudgePrompt(context);
@@ -94,7 +107,7 @@ export async function POST(req: NextRequest) {
                   { role: 'user', content: user },
                 ],
                 temperature: 0.6,
-                max_tokens: 500,
+                max_tokens: 600,
                 stream: true,
               });
 
@@ -139,21 +152,21 @@ export async function POST(req: NextRequest) {
               });
             }
           } else {
-            // DEBATE MODE: Regular debate round
-            const speakers = getNextSpeakers(context);
-            const speakersToUse = speakers.slice(0, maxResponses);
+            // DEBATE MODE - Get speakers who haven't spoken this round
+            const speakers = getNextSpeakers(context, speakersNeeded);
 
-            console.log('🎭 Selected speakers:', speakersToUse);
-            console.log(`📜 Context includes ${messages.length} previous messages`);
+            console.log(`🎭 Round ${round}: Selected ${speakers.length} speakers:`, speakers);
+            console.log(`📊 ${spokenThisRound.length}/6 have spoken this round`);
 
-            for (const personaId of speakersToUse) {
+            for (const personaId of speakers) {
               if (isClosed) break;
               
               const persona = PERSONAS[personaId];
               const { system, user } = buildPersonaPrompt(personaId, context);
               const messageId = nanoid();
 
-              console.log(`🎤 ${persona.name} is about to speak (sees ${context.messages.length} messages)...`);
+              const previousStance = context.stances?.[personaId]?.stance || 'undecided';
+              console.log(`🎤 ${persona.name} (currently ${previousStance.toUpperCase()}) speaking...`);
 
               sendEvent({
                 type: 'persona_start',
@@ -171,7 +184,7 @@ export async function POST(req: NextRequest) {
                     { role: 'user', content: user },
                   ],
                   temperature: persona.temperature,
-                  max_tokens: 200,
+                  max_tokens: 250,
                   stream: true,
                 });
 
@@ -189,25 +202,48 @@ export async function POST(req: NextRequest) {
                   }
                 }
 
-                console.log(`✅ ${persona.name} finished (${fullContent.length} chars)`);
+                // Parse the stance from the message
+                const { stance, stanceChanged } = parseStanceFromMessage(fullContent);
+                const didChangeStance = stanceChanged || (previousStance !== 'undecided' && previousStance !== stance);
+                
+                console.log(`✅ ${persona.name}: ${stance.toUpperCase()}${didChangeStance ? ' (CHANGED!)' : ''}`);
+
+                // Track that this persona spoke
+                newlySpoken.push(personaId);
 
                 sendEvent({
                   type: 'persona_complete',
                   personaId,
                   messageId,
                   fullContent,
+                  stance,
+                  stanceChanged: didChangeStance,
+                  previousStance,
                 });
 
-                // Add to context so next persona sees this message
+                // Update context for next persona
                 context.messages.push({
                   id: messageId,
                   personaId,
                   content: fullContent,
                   timestamp: Date.now(),
                   votes: { agree: 0, interesting: 0, disagree: 0 },
+                  stance,
+                  stanceChanged: didChangeStance,
                 });
 
-                // Small delay between personas
+                // Update stance in context
+                if (!context.stances) context.stances = {};
+                context.stances[personaId] = {
+                  personaId,
+                  stance,
+                  changedFrom: didChangeStance ? previousStance : undefined,
+                };
+
+                // Update spoken list
+                if (!context.spokenThisRound) context.spokenThisRound = [];
+                context.spokenThisRound.push(personaId);
+
                 await new Promise((resolve) => setTimeout(resolve, 300));
               } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
@@ -222,11 +258,25 @@ export async function POST(req: NextRequest) {
               }
             }
 
+            // Check if all 6 have now spoken
+            const allSpokenNow = [...spokenThisRound, ...newlySpoken];
+            const roundComplete = DEBATING_PERSONAS.every(id => allSpokenNow.includes(id));
+
             sendEvent({
               type: 'round_complete',
               round,
               totalMessages: context.messages.length,
+              stances: context.stances,
+              spokenThisRound: allSpokenNow,
+              roundFullyComplete: roundComplete,
+              remainingSpeakers: DEBATING_PERSONAS.filter(id => !allSpokenNow.includes(id)),
             });
+
+            if (roundComplete) {
+              console.log(`🏁 Round ${round} COMPLETE - All 6 personas have spoken!`);
+            } else {
+              console.log(`⏳ Round ${round} continuing - ${6 - allSpokenNow.length} speakers remaining`);
+            }
           }
 
           closeStream();

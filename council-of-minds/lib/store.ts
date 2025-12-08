@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import { nanoid } from 'nanoid';
-import { DebateState, DebateMessage, PersonaId, Vote, Debate } from './types';
+import { DebateState, DebateMessage, PersonaId, Vote, Debate, Stance } from './types';
 import { useKarmaStore } from './karma-store';
+import { DEBATING_PERSONAS } from './personas';
 
 export const useDebateStore = create<DebateState>((set, get) => ({
   currentDebate: null,
@@ -14,6 +15,12 @@ export const useDebateStore = create<DebateState>((set, get) => ({
     // Award karma for submitting a topic
     useKarmaStore.getState().submitTopic();
     
+    // Initialize stances for all debating personas as undecided
+    const initialStances: Record<PersonaId, { personaId: PersonaId; stance: Stance }> = {} as any;
+    DEBATING_PERSONAS.forEach(id => {
+      initialStances[id] = { personaId: id, stance: 'undecided' };
+    });
+    
     set({
       currentDebate: {
         id: nanoid(),
@@ -22,6 +29,8 @@ export const useDebateStore = create<DebateState>((set, get) => ({
         status: 'active',
         round: 1,
         createdAt: Date.now(),
+        stances: initialStances,
+        spokenThisRound: [],
       },
       isDebating: true,
       userVotes: {},
@@ -37,10 +46,21 @@ export const useDebateStore = create<DebateState>((set, get) => ({
       useKarmaStore.getState().receiveVerdict();
     }
 
+    // Track who has spoken this round
+    let newSpokenThisRound = [...currentDebate.spokenThisRound];
+    if (message.personaId !== 'judge' && !newSpokenThisRound.includes(message.personaId)) {
+      newSpokenThisRound.push(message.personaId);
+    }
+
+    // Check if all 6 have spoken - if so, increment round and reset
+    const allSpoken = DEBATING_PERSONAS.every(id => newSpokenThisRound.includes(id));
+    
     set({
       currentDebate: {
         ...currentDebate,
         messages: [...currentDebate.messages, message],
+        spokenThisRound: allSpoken ? [] : newSpokenThisRound,
+        round: allSpoken ? currentDebate.round + 1 : currentDebate.round,
       },
       streamingContent: '',
       activePersona: null,
@@ -53,6 +73,29 @@ export const useDebateStore = create<DebateState>((set, get) => ({
 
   setActivePersona: (personaId: PersonaId | null) => {
     set({ activePersona: personaId });
+  },
+
+  updateStance: (personaId: PersonaId, stance: Stance, reason?: string) => {
+    const { currentDebate } = get();
+    if (!currentDebate) return;
+
+    const previousStance = currentDebate.stances[personaId];
+    const stanceChanged = previousStance && previousStance.stance !== stance && previousStance.stance !== 'undecided';
+    
+    set({
+      currentDebate: {
+        ...currentDebate,
+        stances: {
+          ...currentDebate.stances,
+          [personaId]: {
+            personaId,
+            stance,
+            reason,
+            changedFrom: stanceChanged ? previousStance.stance : undefined,
+          },
+        },
+      },
+    });
   },
 
   vote: (messageId: string, voteType: Vote['type']) => {
@@ -103,6 +146,7 @@ export const useDebateStore = create<DebateState>((set, get) => ({
       currentDebate: {
         ...currentDebate,
         round: currentDebate.round + 1,
+        spokenThisRound: [], // Reset for new round
       },
     });
   },
