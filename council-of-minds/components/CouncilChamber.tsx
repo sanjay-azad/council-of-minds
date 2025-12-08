@@ -2,7 +2,7 @@
 
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Pause, Play, RotateCcw, Gavel, FastForward, ThumbsUp, ThumbsDown, HelpCircle } from 'lucide-react';
+import { Pause, RotateCcw, Gavel, FastForward } from 'lucide-react';
 import { useDebateStore } from '@/lib/store';
 import { PERSONAS, DEBATING_PERSONAS } from '@/lib/personas';
 import { DebateMessage, TypingIndicator } from './DebateMessage';
@@ -12,16 +12,6 @@ import clsx from 'clsx';
 interface CouncilChamberProps {
   onContinueDebate?: () => void;
   onTriggerJudge?: () => void;
-}
-
-function StanceIcon({ stance }: { stance?: Stance }) {
-  if (!stance || stance === 'undecided') {
-    return <HelpCircle className="w-3 h-3 text-gray-500" />;
-  }
-  if (stance === 'for') {
-    return <ThumbsUp className="w-3 h-3 text-green-400" />;
-  }
-  return <ThumbsDown className="w-3 h-3 text-red-400" />;
 }
 
 function StanceMeter({ stances }: { stances: Record<string, { stance: Stance }> }) {
@@ -84,52 +74,31 @@ export function CouncilChamber({ onContinueDebate, onTriggerJudge }: CouncilCham
 
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const [isUserScrolling, setIsUserScrolling] = useState(false);
-  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [autoScroll, setAutoScroll] = useState(true);
+  const userScrolledRef = useRef(false);
 
-  const isNearBottom = useCallback(() => {
-    const container = messagesContainerRef.current;
-    if (!container) return true;
-    const threshold = 100;
-    return container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
-  }, []);
+  // Only auto-scroll when a new message is COMPLETED (not during streaming)
+  useEffect(() => {
+    if (autoScroll && !activePersona && messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [currentDebate?.messages.length, autoScroll, activePersona]);
 
+  // Handle user scroll - disable auto-scroll if user scrolls up
   const handleScroll = useCallback(() => {
-    setIsUserScrolling(true);
+    const container = messagesContainerRef.current;
+    if (!container) return;
     
-    if (scrollTimeoutRef.current) {
-      clearTimeout(scrollTimeoutRef.current);
-    }
+    const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
     
-    if (isNearBottom()) {
-      setIsUserScrolling(false);
-    } else {
-      scrollTimeoutRef.current = setTimeout(() => {
-        if (isNearBottom()) {
-          setIsUserScrolling(false);
-        }
-      }, 1500);
+    if (!isAtBottom) {
+      userScrolledRef.current = true;
+      setAutoScroll(false);
+    } else if (userScrolledRef.current) {
+      // User scrolled back to bottom, re-enable auto-scroll
+      userScrolledRef.current = false;
+      setAutoScroll(true);
     }
-  }, [isNearBottom]);
-
-  useEffect(() => {
-    if (!isUserScrolling && messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [currentDebate?.messages.length, isUserScrolling]);
-
-  useEffect(() => {
-    if (!isUserScrolling && streamingContent && messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [streamingContent, isUserScrolling]);
-
-  useEffect(() => {
-    return () => {
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
-      }
-    };
   }, []);
 
   if (!currentDebate) return null;
@@ -141,7 +110,7 @@ export function CouncilChamber({ onContinueDebate, onTriggerJudge }: CouncilCham
     <div className="flex flex-col lg:flex-row gap-6 w-full max-w-7xl mx-auto p-4">
       {/* Council Members Sidebar */}
       <motion.div
-        className="lg:w-72 flex-shrink-0"
+        className="lg:w-64 flex-shrink-0"
         initial={{ opacity: 0, x: -20 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ duration: 0.5 }}
@@ -155,7 +124,7 @@ export function CouncilChamber({ onContinueDebate, onTriggerJudge }: CouncilCham
           <StanceMeter stances={currentDebate.stances} />
         )}
         
-        <div className="grid grid-cols-3 lg:grid-cols-1 gap-2">
+        <div className="grid grid-cols-4 lg:grid-cols-1 gap-2">
           {/* Debating Personas */}
           {DEBATING_PERSONAS.map((personaId) => {
             const persona = PERSONAS[personaId];
@@ -163,8 +132,6 @@ export function CouncilChamber({ onContinueDebate, onTriggerJudge }: CouncilCham
               (m) => m.personaId === personaId
             ).length;
             const isActive = activePersona === personaId;
-            const stance = currentDebate.stances?.[personaId]?.stance;
-            const changedStance = currentDebate.stances?.[personaId]?.changedFrom;
 
             return (
               <motion.div
@@ -184,7 +151,7 @@ export function CouncilChamber({ onContinueDebate, onTriggerJudge }: CouncilCham
                 <div
                   className={clsx(
                     'w-10 h-10 rounded-full flex items-center justify-center text-xl',
-                    'border-2 transition-all duration-300 relative'
+                    'border-2 transition-all duration-300'
                   )}
                   style={{
                     borderColor: persona.color,
@@ -193,40 +160,14 @@ export function CouncilChamber({ onContinueDebate, onTriggerJudge }: CouncilCham
                   }}
                 >
                   {persona.avatar}
-                  {/* Stance indicator */}
-                  <div className={clsx(
-                    'absolute -bottom-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center',
-                    stance === 'for' && 'bg-green-500',
-                    stance === 'against' && 'bg-red-500',
-                    stance === 'undecided' && 'bg-gray-600'
-                  )}>
-                    <StanceIcon stance={stance} />
-                  </div>
                 </div>
                 <div className="hidden lg:block flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p
-                      className="text-sm font-medium truncate"
-                      style={{ color: persona.color }}
-                    >
-                      {persona.name}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className={clsx(
-                      'text-xs font-medium uppercase',
-                      stance === 'for' && 'text-green-400',
-                      stance === 'against' && 'text-red-400',
-                      stance === 'undecided' && 'text-gray-500'
-                    )}>
-                      {stance || 'undecided'}
-                    </span>
-                    {changedStance && (
-                      <span className="text-xs text-purple-400">
-                        (was {changedStance})
-                      </span>
-                    )}
-                  </div>
+                  <p
+                    className="text-sm font-medium truncate"
+                    style={{ color: persona.color }}
+                  >
+                    {persona.name}
+                  </p>
                   <p className="text-xs text-gray-500">
                     {messageCount} message{messageCount !== 1 ? 's' : ''}
                   </p>

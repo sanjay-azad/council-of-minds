@@ -71,7 +71,8 @@ RESPONSE FORMAT:
 [STANCE] Your argument...
 
 Example: "[FOR] I believe this because..."
-Example: "[AGAINST] I've changed my mind. The Analyst's point about... convinced me that..."
+Example: "[AGAINST] I do not agree with the motion. The Analyst's point about... convinced me that..."
+Say that I have changed my mind only when you change your stance from your previous reply.
 
 RULES:
 1. Stay in character as ${persona.name}
