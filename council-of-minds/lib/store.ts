@@ -54,17 +54,34 @@ export const useDebateStore = create<DebateState>((set, get) => ({
 
     // Check if all 6 have spoken - if so, increment round and reset
     const allSpoken = DEBATING_PERSONAS.every(id => newSpokenThisRound.includes(id));
-    
-    set({
-      currentDebate: {
-        ...currentDebate,
-        messages: [...currentDebate.messages, message],
-        spokenThisRound: allSpoken ? [] : newSpokenThisRound,
-        round: allSpoken ? currentDebate.round + 1 : currentDebate.round,
-      },
-      streamingContent: '',
-      activePersona: null,
-    });
+
+    // If the round completed (all 6 spoke), auto-pause the debate so UI shows Resume
+    if (allSpoken) {
+      // Append message then pause
+      set({
+        currentDebate: {
+          ...currentDebate,
+          messages: [...currentDebate.messages, message],
+          spokenThisRound: [],
+          round: currentDebate.round + 1,
+          status: 'paused',
+        },
+        streamingContent: '',
+        activePersona: null,
+        isDebating: false,
+      });
+    } else {
+      set({
+        currentDebate: {
+          ...currentDebate,
+          messages: [...currentDebate.messages, message],
+          spokenThisRound: newSpokenThisRound,
+          round: currentDebate.round,
+        },
+        streamingContent: '',
+        activePersona: null,
+      });
+    }
   },
 
   updateStreamingContent: (content: string) => {

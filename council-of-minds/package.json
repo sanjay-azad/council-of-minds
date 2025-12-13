@@ -18,6 +18,9 @@
     "lucide-react": "^0.468.0",
     "clsx": "^2.1.1",
     "nanoid": "^5.0.9"
+    ,
+    "marked": "^5.1.1",
+    "dompurify": "^3.0.7"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

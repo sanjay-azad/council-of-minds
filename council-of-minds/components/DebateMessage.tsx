@@ -1,6 +1,8 @@
 'use client';
 
 import { motion } from 'framer-motion';
+import DOMPurify from 'dompurify';
+import { marked } from 'marked';
 import { ThumbsUp, Sparkles, ThumbsDown, Gavel, RefreshCw } from 'lucide-react';
 import { DebateMessage as DebateMessageType, PersonaId, Stance } from '@/lib/types';
 import { PERSONAS } from '@/lib/personas';
@@ -66,16 +68,18 @@ export function DebateMessage({
         </div>
 
         <div className="pl-4 border-l-4 border-yellow-500/50">
-          <p className="text-gray-100 leading-relaxed whitespace-pre-wrap text-lg">
-            {content}
-            {isStreaming && (
-              <motion.span
-                className="inline-block w-2 h-5 ml-1 bg-yellow-500"
-                animate={{ opacity: [1, 0] }}
-                transition={{ repeat: Infinity, duration: 0.8 }}
-              />
-            )}
-          </p>
+          {/* Render verdict as sanitized HTML from Markdown */}
+          <div
+            className="text-gray-100 leading-relaxed text-lg"
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(content || '')) }}
+          />
+          {isStreaming && (
+            <motion.span
+              className="inline-block w-2 h-5 ml-1 bg-yellow-500"
+              animate={{ opacity: [1, 0] }}
+              transition={{ repeat: Infinity, duration: 0.8 }}
+            />
+          )}
         </div>
 
         {!isStreaming && (

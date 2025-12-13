@@ -4,6 +4,7 @@ import { useRef, useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Pause, RotateCcw, Gavel, FastForward } from 'lucide-react';
 import { useDebateStore } from '@/lib/store';
+import { useDebate } from '@/hooks/useDebate';
 import { PERSONAS, DEBATING_PERSONAS } from '@/lib/personas';
 import { DebateMessage, TypingIndicator } from './DebateMessage';
 import { Stance } from '@/lib/types';
@@ -67,10 +68,12 @@ export function CouncilChamber({ onContinueDebate, onTriggerJudge }: CouncilCham
     isDebating,
     activePersona,
     streamingContent,
-    pauseDebate,
     resumeDebate,
     reset,
   } = useDebateStore();
+
+  // useDebate provides stopDebate which aborts streaming network requests
+  const { stopDebate } = useDebate();
 
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -299,7 +302,10 @@ export function CouncilChamber({ onContinueDebate, onTriggerJudge }: CouncilCham
                 <ControlButton
                   icon={Pause}
                   label="Pause"
-                  onClick={pauseDebate}
+                  // call stopDebate which aborts the streaming fetch and then sets paused state
+                  onClick={() => {
+                    stopDebate();
+                  }}
                   color="#f59e0b"
                 />
               ) : (
@@ -307,6 +313,7 @@ export function CouncilChamber({ onContinueDebate, onTriggerJudge }: CouncilCham
                   icon={FastForward}
                   label="Continue Debate"
                   onClick={() => {
+                    // resumeDebate toggles status back to active; trigger continuation optionally
                     resumeDebate();
                     onContinueDebate?.();
                   }}

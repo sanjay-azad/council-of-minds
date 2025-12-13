@@ -29,7 +29,12 @@ export function useDebate() {
   const streamingContentRef = useRef<string>('');
 
   const handleStreamEvent = useCallback((event: StreamEvent) => {
-    const { addMessage, setActivePersona, updateStreamingContent, setStatus, endDebate, updateStance } = useDebateStore.getState();
+    const { addMessage, setActivePersona, updateStreamingContent, setStatus, endDebate, updateStance, currentDebate } = useDebateStore.getState();
+    // If the debate is paused, ignore incoming stream events (prevents new persona from speaking)
+    if (currentDebate?.status === 'paused') {
+      console.log('⏸️ Ignoring stream event while paused:', event.type);
+      return;
+    }
     
     switch (event.type) {
       case 'persona_start':
@@ -69,6 +74,24 @@ export function useDebate() {
         }
         setActivePersona(null);
         streamingContentRef.current = '';
+
+        // AFTER adding the message, check if we've reached 3 speakers this round.
+        // If so, auto-pause the debate by aborting the stream and setting status to 'paused'.
+        try {
+          const fresh = useDebateStore.getState();
+          const spokenThisRound = fresh.currentDebate?.spokenThisRound || [];
+          // Only auto-pause during normal debating (not when judge delivered verdict)
+          if (!event.isVerdict && spokenThisRound.length >= 3) {
+            console.log('⏸️ Auto-pausing after 3 speakers this round');
+            if (abortControllerRef.current) {
+              abortControllerRef.current.abort();
+            }
+            setStatus('paused');
+          }
+        } catch (e) {
+          // swallow any errors here to avoid breaking the stream handler
+          console.error('Auto-pause check failed', e);
+        }
         break;
 
       case 'persona_error':

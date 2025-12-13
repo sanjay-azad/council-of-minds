@@ -5,6 +5,10 @@ export const metadata: Metadata = {
   title: 'Council of Minds | AI Debate Arena',
   description: 'Watch AI personas with distinct personalities debate any topic. An interactive, gamified decision-making experience.',
   keywords: ['AI', 'debate', 'LLM', 'council', 'decision making', 'gamification'],
+  icons: {
+    icon: '/favicon.svg',
+    apple: '/favicon.svg',
+  },
 };
 
 function Particles() {
