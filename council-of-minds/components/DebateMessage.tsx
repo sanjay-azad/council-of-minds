@@ -3,7 +3,8 @@
 import { motion } from 'framer-motion';
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
-import { ThumbsUp, Sparkles, ThumbsDown, Gavel, RefreshCw } from 'lucide-react';
+import { ThumbsUp, Sparkles, ThumbsDown, Gavel, RefreshCw, Share2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import { DebateMessage as DebateMessageType, PersonaId, Stance } from '@/lib/types';
 import { PERSONAS } from '@/lib/personas';
 import { PersonaAvatar } from './PersonaAvatar';
@@ -42,6 +43,43 @@ export function DebateMessage({
   const userVote = userVotes[message.id];
   const content = isStreaming ? streamingContent : message.content;
   const isVerdict = message.isVerdict;
+
+  // Remove [FOR] or [AGAINST] tags from the start of the message for display
+  const displayContent = content?.replace(/^\s*\[(FOR|AGAINST)\]\s*/i, '');
+
+  const [toast, setToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!toast) return;
+    const id = setTimeout(() => setToast(null), 2500);
+    return () => clearTimeout(id);
+  }, [toast]);
+
+  const handleShare = async () => {
+    try {
+      const textToShare = `${persona.name}: ${message.content}`;
+      if (navigator.share) {
+        await navigator.share({ title: 'Council of Minds — Quote', text: textToShare });
+        setToast('Shared');
+      } else if (navigator.clipboard) {
+        await navigator.clipboard.writeText(textToShare);
+        // simple feedback could be added (toast) — omitted for brevity
+        setToast('Copied to clipboard');
+      } else {
+        // fallback: create temporary textarea
+        const el = document.createElement('textarea');
+        el.value = textToShare;
+        document.body.appendChild(el);
+        el.select();
+        document.execCommand('copy');
+        document.body.removeChild(el);
+        setToast('Copied to clipboard');
+      }
+    } catch (e) {
+      console.error('Share failed', e);
+      setToast('Share failed');
+    }
+  };
 
   // Special styling for Judge's verdict
   if (isVerdict) {
@@ -97,8 +135,8 @@ export function DebateMessage({
     <motion.div
       className={clsx(
         "message-enter flex gap-4 p-4 rounded-xl bg-chamber-accent/30 border hover:border-chamber-glow transition-colors",
-        message.stanceChanged 
-          ? "border-purple-500/50 bg-purple-900/10" 
+        message.stanceChanged
+          ? "border-purple-500/50 bg-purple-900/10"
           : "border-chamber-border"
       )}
       initial={{ opacity: 0, y: 20, scale: 0.95 }}
@@ -113,7 +151,6 @@ export function DebateMessage({
           size="md"
         />
       </div>
-
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-2 flex-wrap">
           <span
@@ -137,9 +174,8 @@ export function DebateMessage({
             </span>
           )}
         </div>
-
         <p className="text-gray-200 leading-relaxed whitespace-pre-wrap">
-          {content}
+          {displayContent}
           {isStreaming && (
             <motion.span
               className="inline-block w-2 h-4 ml-1 bg-current"
@@ -148,34 +184,60 @@ export function DebateMessage({
             />
           )}
         </p>
-
         {!isStreaming && (
-          <div className="flex items-center gap-4 mt-3">
-            <VoteButton
-              icon={ThumbsUp}
-              count={message.votes.agree}
-              isActive={userVote === 'agree'}
-              color="#10b981"
-              onClick={() => vote(message.id, 'agree')}
-              label="Agree"
-            />
-            <VoteButton
-              icon={Sparkles}
-              count={message.votes.interesting}
-              isActive={userVote === 'interesting'}
-              color="#f59e0b"
-              onClick={() => vote(message.id, 'interesting')}
-              label="Interesting"
-            />
-            <VoteButton
-              icon={ThumbsDown}
-              count={message.votes.disagree}
-              isActive={userVote === 'disagree'}
-              color="#ef4444"
-              onClick={() => vote(message.id, 'disagree')}
-              label="Disagree"
-            />
-          </div>
+          <>
+            <div className="flex items-center gap-4 mt-3">
+              <VoteButton
+                icon={ThumbsUp}
+                count={message.votes.agree}
+                isActive={userVote === 'agree'}
+                color="#10b981"
+                onClick={() => {
+                  vote(message.id, 'agree');
+                  setToast('Voted: Agree');
+                }}
+                label="Agree"
+              />
+              <VoteButton
+                icon={Sparkles}
+                count={message.votes.interesting}
+                isActive={userVote === 'interesting'}
+                color="#f59e0b"
+                onClick={() => {
+                  vote(message.id, 'interesting');
+                  setToast('Voted: Interesting');
+                }}
+                label="Interesting"
+              />
+              <VoteButton
+                icon={ThumbsDown}
+                count={message.votes.disagree}
+                isActive={userVote === 'disagree'}
+                color="#ef4444"
+                onClick={() => {
+                  vote(message.id, 'disagree');
+                  setToast('Voted: Disagree');
+                }}
+                label="Disagree"
+              />
+              <VoteButton
+                icon={Share2}
+                count={0}
+                isActive={false}
+                color="#7c3aed"
+                onClick={handleShare}
+                label="Share"
+              />
+            </div>
+            {/* Toast */}
+            {toast && (
+              <div className="fixed left-1/2 transform -translate-x-1/2 bottom-8 z-50">
+                <div className="bg-gray-900 text-white px-4 py-2 rounded-full shadow-lg">
+                  {toast}
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
     </motion.div>

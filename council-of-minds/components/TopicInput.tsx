@@ -66,7 +66,8 @@ export function TopicInput({ onSubmit, isDisabled = false }: TopicInputProps) {
             disabled={isDisabled}
             rows={3}
             className={clsx(
-              'w-full px-5 py-4 pr-28 bg-chamber-accent/50 text-white',
+              // increase right padding to ensure controls do not overlap user text
+              'w-full px-5 py-4 pr-50 bg-chamber-accent/50 text-white',
               'placeholder-gray-500 resize-none',
               'focus:outline-none',
               'font-body text-lg',
