@@ -3,6 +3,7 @@ import { nanoid } from 'nanoid';
 import { DebateState, DebateMessage, PersonaId, Vote, Debate, Stance } from './types';
 import { useKarmaStore } from './karma-store';
 import { DEBATING_PERSONAS } from './personas';
+import { MAX_ROUNDS } from './constants';
 
 export const useDebateStore = create<DebateState>((set, get) => ({
   currentDebate: null,
@@ -10,17 +11,19 @@ export const useDebateStore = create<DebateState>((set, get) => ({
   activePersona: null,
   streamingContent: '',
   userVotes: {},
+  error: null,
 
   startDebate: (topic: string) => {
-    // Award karma for submitting a topic
     useKarmaStore.getState().submitTopic();
-    
-    // Initialize stances for all debating personas as undecided
-    const initialStances: Record<PersonaId, { personaId: PersonaId; stance: Stance }> = {} as any;
-    DEBATING_PERSONAS.forEach(id => {
+
+    const initialStances: Record<PersonaId, { personaId: PersonaId; stance: Stance }> = {} as Record<
+      PersonaId,
+      { personaId: PersonaId; stance: Stance }
+    >;
+    DEBATING_PERSONAS.forEach((id) => {
       initialStances[id] = { personaId: id, stance: 'undecided' };
     });
-    
+
     set({
       currentDebate: {
         id: nanoid(),
@@ -34,6 +37,7 @@ export const useDebateStore = create<DebateState>((set, get) => ({
       },
       isDebating: true,
       userVotes: {},
+      error: null,
     });
   },
 
@@ -41,29 +45,25 @@ export const useDebateStore = create<DebateState>((set, get) => ({
     const { currentDebate } = get();
     if (!currentDebate) return;
 
-    // If it's a verdict, award karma
     if (message.isVerdict) {
       useKarmaStore.getState().receiveVerdict();
     }
 
-    // Track who has spoken this round
     let newSpokenThisRound = [...currentDebate.spokenThisRound];
     if (message.personaId !== 'judge' && !newSpokenThisRound.includes(message.personaId)) {
       newSpokenThisRound.push(message.personaId);
     }
 
-    // Check if all 6 have spoken - if so, increment round and reset
-    const allSpoken = DEBATING_PERSONAS.every(id => newSpokenThisRound.includes(id));
+    const allSpoken = DEBATING_PERSONAS.every((id) => newSpokenThisRound.includes(id));
+    const roundLimitReached = currentDebate.round >= MAX_ROUNDS && allSpoken;
 
-    // If the round completed (all 6 spoke), auto-pause the debate so UI shows Resume
     if (allSpoken) {
-      // Append message then pause
       set({
         currentDebate: {
           ...currentDebate,
           messages: [...currentDebate.messages, message],
           spokenThisRound: [],
-          round: currentDebate.round + 1,
+          round: roundLimitReached ? currentDebate.round : currentDebate.round + 1,
           status: 'paused',
         },
         streamingContent: '',
@@ -76,7 +76,6 @@ export const useDebateStore = create<DebateState>((set, get) => ({
           ...currentDebate,
           messages: [...currentDebate.messages, message],
           spokenThisRound: newSpokenThisRound,
-          round: currentDebate.round,
         },
         streamingContent: '',
         activePersona: null,
@@ -97,8 +96,9 @@ export const useDebateStore = create<DebateState>((set, get) => ({
     if (!currentDebate) return;
 
     const previousStance = currentDebate.stances[personaId];
-    const stanceChanged = previousStance && previousStance.stance !== stance && previousStance.stance !== 'undecided';
-    
+    const stanceChanged =
+      previousStance && previousStance.stance !== stance && previousStance.stance !== 'undecided';
+
     set({
       currentDebate: {
         ...currentDebate,
@@ -122,7 +122,6 @@ export const useDebateStore = create<DebateState>((set, get) => ({
     const previousVote = userVotes[messageId];
     const newUserVotes = { ...userVotes };
 
-    // Only award karma if this is a NEW vote (not changing existing)
     if (!previousVote) {
       useKarmaStore.getState().castVote();
     }
@@ -137,11 +136,11 @@ export const useDebateStore = create<DebateState>((set, get) => ({
       if (msg.id !== messageId) return msg;
 
       const newVotes = { ...msg.votes };
-      
+
       if (previousVote) {
         newVotes[previousVote] = Math.max(0, newVotes[previousVote] - 1);
       }
-      
+
       if (previousVote !== voteType) {
         newVotes[voteType] = newVotes[voteType] + 1;
       }
@@ -163,7 +162,7 @@ export const useDebateStore = create<DebateState>((set, get) => ({
       currentDebate: {
         ...currentDebate,
         round: currentDebate.round + 1,
-        spokenThisRound: [], // Reset for new round
+        spokenThisRound: [],
       },
     });
   },
@@ -195,6 +194,7 @@ export const useDebateStore = create<DebateState>((set, get) => ({
     set({
       currentDebate: { ...currentDebate, status: 'active' },
       isDebating: true,
+      error: null,
     });
   },
 
@@ -202,7 +202,6 @@ export const useDebateStore = create<DebateState>((set, get) => ({
     const { currentDebate } = get();
     if (!currentDebate) return;
 
-    // Award karma for completing a debate
     useKarmaStore.getState().completeDebate();
 
     set({
@@ -213,6 +212,10 @@ export const useDebateStore = create<DebateState>((set, get) => ({
     });
   },
 
+  setError: (error: string | null) => {
+    set({ error, isDebating: false, activePersona: null, streamingContent: '' });
+  },
+
   reset: () => {
     set({
       currentDebate: null,
@@ -220,6 +223,7 @@ export const useDebateStore = create<DebateState>((set, get) => ({
       activePersona: null,
       streamingContent: '',
       userVotes: {},
+      error: null,
     });
   },
 }));

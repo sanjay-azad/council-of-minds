@@ -1,36 +1,34 @@
 # 🎭 Council of Minds
 
-An interactive AI debate arena where 7 unique AI personas with distinct personalities debate any topic you throw at them.
-
-![Council of Minds](https://via.placeholder.com/800x400?text=Council+of+Minds)
+An interactive AI debate arena where 6 unique AI personas debate any topic, then The Judge delivers a final verdict.
 
 ## ✨ Features
 
-- **7 Unique AI Personas**: Each with distinct personalities, speaking styles, and perspectives
+- **6 Debaters + The Judge**: Distinct personalities with FOR/AGAINST stances
   - 🟣 **The Sage** - Philosopher seeking deeper meaning
   - 🔴 **The Maverick** - Contrarian challenging assumptions
   - 🟢 **The Pragmatist** - Realist focused on practical outcomes
-  - 🔵 **The Dreamer** - Visionary exploring possibilities
   - 🟡 **The Historian** - Scholar drawing from precedent
   - 🌸 **The Empath** - Humanist considering emotional impact
   - ⚪ **The Analyst** - Data-driven logician demanding evidence
+  - ⚖️ **The Judge** - Delivers the final structured verdict
 
-- **Real-time Streaming Debates**: Watch the AI personas respond in real-time with smooth streaming
-- **Interactive Voting**: React to statements with Agree, Interesting, or Disagree
-- **Beautiful UI**: Dark theme with glowing personas and smooth animations
-- **Gamification Ready**: Karma system, achievements, and more (expandable)
+- **Switchable LLM providers**: OpenAI or Google Gemini via environment config
+- **Real-time Streaming Debates**: Watch personas respond with smooth SSE streaming
+- **Interactive Voting**: React with Agree, Interesting, or Disagree
+- **Karma System**: Earn points for starting debates, voting, and verdicts
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
-- Node.js 18+ 
+- Node.js 18+
 - npm or yarn
-- OpenAI API key
+- OpenAI API key and/or Google Gemini API key
 
 ### Installation
 
-1. Clone the repository:
+1. Navigate to the app directory:
 ```bash
 cd council-of-minds
 ```
@@ -42,8 +40,8 @@ npm install
 
 3. Set up environment variables:
 ```bash
-# Create a .env.local file
-echo "OPENAI_API_KEY=your_openai_api_key_here" > .env.local
+cp .env.example .env.local
+# Edit .env.local with your API keys
 ```
 
 4. Run the development server:
@@ -51,12 +49,28 @@ echo "OPENAI_API_KEY=your_openai_api_key_here" > .env.local
 npm run dev
 ```
 
-5. Open [http://localhost:3000](http://localhost:3000) in your browser
+5. Open [http://localhost:3000](http://localhost:3000)
+
+### LLM Provider Configuration
+
+Set `LLM_PROVIDER` in `.env.local`:
+
+```bash
+# Use OpenAI (default)
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o-mini
+
+# Or use Google Gemini
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=...
+GEMINI_MODEL=gemini-2.0-flash
+```
 
 ## 🛠 Tech Stack
 
 - **Framework**: Next.js 15 with App Router
-- **AI/LLM**: Vercel AI SDK with OpenAI GPT-4o-mini
+- **AI/LLM**: Vercel AI SDK (`ai`) with OpenAI and Google Gemini providers
 - **Styling**: Tailwind CSS with custom design system
 - **Animations**: Framer Motion
 - **State Management**: Zustand
@@ -81,20 +95,24 @@ council-of-minds/
 ├── hooks/
 │   └── useDebate.ts          # Debate orchestration hook
 ├── lib/
-│   ├── debate-orchestrator.ts # Persona prompt engineering
-│   ├── personas.ts           # Persona definitions
-│   ├── store.ts              # Zustand state store
-│   └── types.ts              # TypeScript types
+│   ├── llm/                  # Provider abstraction (OpenAI + Gemini)
+│   ├── debate-orchestrator.ts
+│   ├── personas.ts
+│   ├── store.ts
+│   ├── karma-store.ts
+│   ├── constants.ts
+│   └── types.ts
+├── .env.example
 └── package.json
 ```
 
 ## 🎮 How It Works
 
-1. **User submits a topic** - Any question, dilemma, or subject for debate
-2. **Council is summoned** - The system selects 3-4 personas to respond each round
-3. **Real-time streaming** - Each persona's response streams in real-time
-4. **Interactive voting** - Users can vote on each statement
-5. **Continuous debate** - Click "Continue" to hear more perspectives
+1. **User submits a topic** — any question or dilemma
+2. **Council debates in batches** — 3 personas speak, then auto-pause for user control
+3. **Real-time streaming** — each response streams via SSE
+4. **Interactive voting** — vote on each statement
+5. **Continue or verdict** — resume debate (up to 5 rounds) or call The Judge
 
 ### Persona Agent System
 
@@ -130,15 +148,20 @@ export const PERSONAS: Record<PersonaId, Persona> = {
 };
 ```
 
-### Changing the Model
+### Changing the Model or Provider
 
-Edit `app/api/debate/route.ts` to use a different model:
+Edit `.env.local`:
 
-```typescript
-const result = streamText({
-  model: openai('gpt-4o'), // or 'gpt-4-turbo', 'gpt-3.5-turbo'
-  // ...
-});
+```bash
+LLM_PROVIDER=gemini
+GEMINI_MODEL=gemini-2.0-flash
+```
+
+Or for OpenAI:
+
+```bash
+LLM_PROVIDER=openai
+OPENAI_MODEL=gpt-4o
 ```
 
 ## 📈 Future Roadmap

@@ -76,6 +76,7 @@ export interface DebateState {
   activePersona: PersonaId | null;
   streamingContent: string;
   userVotes: Record<string, Vote['type']>;
+  error: string | null;
   
   // Actions
   startDebate: (topic: string) => void;
@@ -89,6 +90,7 @@ export interface DebateState {
   pauseDebate: () => void;
   resumeDebate: () => void;
   endDebate: () => void;
+  setError: (error: string | null) => void;
   reset: () => void;
 }
 

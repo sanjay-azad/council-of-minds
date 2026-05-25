@@ -1,5 +1,6 @@
 import { PersonaId, DebateMessage, Stance, PersonaStance } from './types';
 import { PERSONAS, DEBATING_PERSONAS } from './personas';
+import { MAX_DEBATE_MESSAGES } from './constants';
 
 export interface DebateContext {
   topic: string;
@@ -181,60 +182,67 @@ Your verdict:`;
   return { system, user };
 }
 
-// Parse stance from message content
+// Parse stance from message content — strict match on opening tag only
 export function parseStanceFromMessage(content: string): { stance: Stance; stanceChanged: boolean } {
-  const upperContent = content.toUpperCase();
-  
-  // Check for stance indicator at the start
+  const firstLine = content.trim().split('\n')[0] ?? '';
+  const stanceMatch = firstLine.match(/^\s*\[(FOR|AGAINST|UNDECIDED)\]/i);
+
   let stance: Stance = 'undecided';
-  if (upperContent.startsWith('[FOR]') || upperContent.includes('[FOR]')) {
-    stance = 'for';
-  } else if (upperContent.startsWith('[AGAINST]') || upperContent.includes('[AGAINST]')) {
-    stance = 'against';
-  } else if (upperContent.startsWith('[UNDECIDED]') || upperContent.includes('[UNDECIDED]')) {
-    stance = 'undecided';
+  if (stanceMatch) {
+    const tag = stanceMatch[1].toLowerCase();
+    if (tag === 'for') stance = 'for';
+    else if (tag === 'against') stance = 'against';
   }
-  
-  // Check if they mention changing their mind
+
   const changeIndicators = [
     "i've changed my mind",
-    "i have changed my mind",
+    'i have changed my mind',
     "i'm changing my position",
-    "i must reconsider",
-    "convinced me",
-    "i now believe",
-    "i've reconsidered",
-    "changing my stance",
-    "i stand corrected",
+    'changing my stance',
+    'i stand corrected',
     "you've convinced me",
-    "compelling point",
-    "i must admit",
-    "i concede",
   ];
-  
+
   const lowerContent = content.toLowerCase();
-  const stanceChanged = changeIndicators.some(indicator => lowerContent.includes(indicator));
-  
+  const stanceChanged = changeIndicators.some((indicator) => lowerContent.includes(indicator));
+
   return { stance, stanceChanged };
 }
 
-// Get speakers who haven't spoken this round
+// Get speakers who haven't spoken this round — prioritize mentioned personas
 export function getNextSpeakers(context: DebateContext, count: number = 3): PersonaId[] {
   const spokenThisRound = context.spokenThisRound || [];
-  
-  // Find who hasn't spoken yet this round
-  const notSpokenYet = DEBATING_PERSONAS.filter(id => !spokenThisRound.includes(id));
-  
+  const notSpokenYet = DEBATING_PERSONAS.filter((id) => !spokenThisRound.includes(id));
+
   if (notSpokenYet.length === 0) {
-    // Everyone has spoken - this shouldn't happen if we manage rounds properly
-    // But as fallback, shuffle all and return first 3
-    const shuffled = shuffleArray([...DEBATING_PERSONAS]);
-    return shuffled.slice(0, count);
+    return shuffleArray([...DEBATING_PERSONAS]).slice(0, count);
   }
-  
-  // Shuffle the ones who haven't spoken and return up to 'count'
-  const shuffled = shuffleArray([...notSpokenYet]);
-  return shuffled.slice(0, Math.min(count, notSpokenYet.length));
+
+  const mentioned = findMentionedPersonas(context.messages, notSpokenYet);
+  const prioritized = [
+    ...mentioned.filter((id) => notSpokenYet.includes(id)),
+    ...shuffleArray(notSpokenYet.filter((id) => !mentioned.includes(id))),
+  ];
+
+  return prioritized.slice(0, Math.min(count, notSpokenYet.length));
+}
+
+function findMentionedPersonas(messages: DebateMessage[], candidates: PersonaId[]): PersonaId[] {
+  const recent = messages.slice(-3);
+  if (recent.length === 0) return [];
+
+  const recentText = recent.map((m) => m.content.toLowerCase()).join(' ');
+  const mentioned: PersonaId[] = [];
+
+  for (const id of candidates) {
+    const name = PERSONAS[id].name.toLowerCase();
+    const shortName = name.replace('the ', '');
+    if (recentText.includes(name) || recentText.includes(shortName)) {
+      mentioned.push(id);
+    }
+  }
+
+  return mentioned;
 }
 
 // Helper to shuffle array
@@ -258,7 +266,8 @@ export function getRemainingCount(spokenThisRound: PersonaId[]): number {
 }
 
 export function shouldContinueDebate(context: DebateContext): boolean {
-  return context.messages.length < 30; // Allow up to 5 full rounds
+  const nonVerdictCount = context.messages.filter((m) => !m.isVerdict).length;
+  return nonVerdictCount < MAX_DEBATE_MESSAGES;
 }
 
 export function analyzeDebateDynamics(context: DebateContext): {

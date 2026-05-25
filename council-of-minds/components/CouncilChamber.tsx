@@ -2,12 +2,13 @@
 
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Pause, RotateCcw, Gavel, FastForward } from 'lucide-react';
+import { Pause, RotateCcw, Gavel, FastForward, AlertCircle } from 'lucide-react';
 import { useDebateStore } from '@/lib/store';
 import { useDebate } from '@/hooks/useDebate';
 import { PERSONAS, DEBATING_PERSONAS } from '@/lib/personas';
 import { DebateMessage, TypingIndicator } from './DebateMessage';
 import { Stance } from '@/lib/types';
+import { MAX_ROUNDS } from '@/lib/constants';
 import clsx from 'clsx';
 
 interface CouncilChamberProps {
@@ -65,11 +66,11 @@ function StanceMeter({ stances }: { stances: Record<string, { stance: Stance }> 
 export function CouncilChamber({ onContinueDebate, onTriggerJudge }: CouncilChamberProps) {
   const {
     currentDebate,
-    isDebating,
     activePersona,
     streamingContent,
-    resumeDebate,
     reset,
+    error,
+    setError,
   } = useDebateStore();
 
   // useDebate provides stopDebate which aborts streaming network requests
@@ -106,8 +107,11 @@ export function CouncilChamber({ onContinueDebate, onTriggerJudge }: CouncilCham
 
   if (!currentDebate) return null;
 
-  const hasVerdict = currentDebate.messages.some(m => m.isVerdict);
-  const canGetVerdict = currentDebate.messages.length >= 3 && !hasVerdict && currentDebate.status !== 'judging';
+  const hasVerdict = currentDebate.messages.some((m) => m.isVerdict);
+  const canGetVerdict =
+    currentDebate.messages.length >= 3 && !hasVerdict && currentDebate.status !== 'judging';
+  const atRoundLimit = currentDebate.round >= MAX_ROUNDS;
+  const canContinue = !atRoundLimit && !hasVerdict && currentDebate.status !== 'judging';
 
   return (
     <div className="flex flex-col lg:flex-row gap-6 w-full max-w-7xl mx-auto p-4">
@@ -254,6 +258,32 @@ export function CouncilChamber({ onContinueDebate, onTriggerJudge }: CouncilCham
           </div>
         </motion.div>
 
+        {/* Error banner */}
+        {error && (
+          <motion.div
+            className="mb-4 p-4 rounded-xl bg-red-500/10 border border-red-500/30 flex items-start gap-3"
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm text-red-300">{error}</p>
+              <button
+                onClick={() => setError(null)}
+                className="text-xs text-red-400 hover:text-red-300 mt-1 underline"
+              >
+                Dismiss
+              </button>
+            </div>
+          </motion.div>
+        )}
+
+        {atRoundLimit && !hasVerdict && (
+          <div className="mb-4 p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/30 text-sm text-yellow-300 text-center">
+            Round limit reached ({MAX_ROUNDS} rounds). Request a verdict to conclude the debate.
+          </div>
+        )}
+
         {/* Messages */}
         <div 
           ref={messagesContainerRef}
@@ -298,28 +328,27 @@ export function CouncilChamber({ onContinueDebate, onTriggerJudge }: CouncilCham
         >
           {currentDebate.status !== 'completed' && !hasVerdict && (
             <>
-              {isDebating ? (
+              {currentDebate.status === 'active' ? (
                 <ControlButton
                   icon={Pause}
                   label="Pause"
-                  // call stopDebate which aborts the streaming fetch and then sets paused state
                   onClick={() => {
                     stopDebate();
                   }}
                   color="#f59e0b"
                 />
               ) : (
-                <ControlButton
-                  icon={FastForward}
-                  label="Continue Debate"
-                  onClick={() => {
-                    // resumeDebate toggles status back to active; trigger continuation optionally
-                    resumeDebate();
-                    onContinueDebate?.();
-                  }}
-                  color="#10b981"
-                  primary
-                />
+                canContinue && (
+                  <ControlButton
+                    icon={FastForward}
+                    label="Continue Debate"
+                    onClick={() => {
+                      onContinueDebate?.();
+                    }}
+                    color="#10b981"
+                    primary
+                  />
+                )
               )}
               
               {canGetVerdict && (

@@ -1,0 +1,11 @@
+{
+  "name": "council-of-minds-monorepo",
+  "private": true,
+  "scripts": {
+    "postinstall": "npm install --prefix council-of-minds",
+    "dev": "npm run dev --prefix council-of-minds",
+    "build": "npm run build --prefix council-of-minds",
+    "start": "npm run start --prefix council-of-minds",
+    "lint": "npm run lint --prefix council-of-minds"
+  }
+}

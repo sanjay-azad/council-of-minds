@@ -3,14 +3,25 @@
 import { useCallback, useRef } from 'react';
 import { useDebateStore } from '@/lib/store';
 import { PersonaId, DebateMessage, Stance } from '@/lib/types';
+import { MAX_ROUNDS } from '@/lib/constants';
 
 interface StreamEvent {
-  type: 'persona_start' | 'content' | 'persona_complete' | 'persona_error' | 'round_complete' | 'verdict_complete' | 'error';
+  type:
+    | 'persona_start'
+    | 'content'
+    | 'persona_complete'
+    | 'persona_error'
+    | 'round_complete'
+    | 'batch_complete'
+    | 'verdict_complete'
+    | 'debate_limit_reached'
+    | 'error';
   personaId?: PersonaId;
   messageId?: string;
   content?: string;
   fullContent?: string;
   error?: string;
+  message?: string;
   round?: number;
   totalMessages?: number;
   isVerdict?: boolean;
@@ -23,22 +34,78 @@ interface StreamEvent {
   remainingSpeakers?: PersonaId[];
 }
 
+async function consumeSSEStream(
+  response: Response,
+  handleEvent: (event: StreamEvent) => void,
+  signal: AbortSignal
+) {
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error('No reader available');
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  const processBuffer = (final = false) => {
+    const parts = buffer.split('\n\n');
+    if (final) {
+      buffer = '';
+      for (const line of parts) {
+        if (line.startsWith('data: ')) {
+          try {
+            handleEvent(JSON.parse(line.slice(6)));
+          } catch (e) {
+            console.error('Failed to parse event:', line, e);
+          }
+        }
+      }
+      return;
+    }
+
+    buffer = parts.pop() || '';
+    for (const line of parts) {
+      if (line.startsWith('data: ')) {
+        try {
+          handleEvent(JSON.parse(line.slice(6)));
+        } catch (e) {
+          console.error('Failed to parse event:', line, e);
+        }
+      }
+    }
+  };
+
+  while (true) {
+    if (signal.aborted) break;
+
+    const { done, value } = await reader.read();
+    if (done) {
+      processBuffer(true);
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    processBuffer();
+  }
+}
+
 export function useDebate() {
   const store = useDebateStore();
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamingContentRef = useRef<string>('');
 
   const handleStreamEvent = useCallback((event: StreamEvent) => {
-    const { addMessage, setActivePersona, updateStreamingContent, setStatus, endDebate, updateStance, currentDebate } = useDebateStore.getState();
-    // If the debate is paused, ignore incoming stream events (prevents new persona from speaking)
-    if (currentDebate?.status === 'paused') {
-      console.log('⏸️ Ignoring stream event while paused:', event.type);
-      return;
-    }
-    
+    const {
+      addMessage,
+      setActivePersona,
+      updateStreamingContent,
+      setStatus,
+      endDebate,
+      updateStance,
+      pauseDebate,
+      setError,
+    } = useDebateStore.getState();
+
     switch (event.type) {
       case 'persona_start':
-        console.log('🎭 Persona starting:', event.personaId, event.isVerdict ? '(VERDICT)' : '');
         streamingContentRef.current = '';
         setActivePersona(event.personaId!);
         updateStreamingContent('');
@@ -53,7 +120,6 @@ export function useDebate() {
         break;
 
       case 'persona_complete':
-        console.log('✅ Persona complete:', event.personaId, event.stance ? `[${event.stance.toUpperCase()}]` : '', event.stanceChanged ? '🔄 CHANGED' : '');
         if (event.personaId && event.messageId && event.fullContent) {
           const message: DebateMessage = {
             id: event.messageId,
@@ -66,142 +132,114 @@ export function useDebate() {
             stanceChanged: event.stanceChanged,
           };
           addMessage(message);
-          
-          // Update stance if provided
+
           if (event.stance && event.personaId !== 'judge') {
             updateStance(event.personaId, event.stance);
           }
         }
         setActivePersona(null);
         streamingContentRef.current = '';
-
-        // AFTER adding the message, check if we've reached 3 speakers this round.
-        // If so, auto-pause the debate by aborting the stream and setting status to 'paused'.
-        try {
-          const fresh = useDebateStore.getState();
-          const spokenThisRound = fresh.currentDebate?.spokenThisRound || [];
-          // Only auto-pause during normal debating (not when judge delivered verdict)
-          if (!event.isVerdict && spokenThisRound.length >= 3) {
-            console.log('⏸️ Auto-pausing after 3 speakers this round');
-            if (abortControllerRef.current) {
-              abortControllerRef.current.abort();
-            }
-            setStatus('paused');
-          }
-        } catch (e) {
-          // swallow any errors here to avoid breaking the stream handler
-          console.error('Auto-pause check failed', e);
-        }
         break;
 
       case 'persona_error':
-        console.error(`❌ Persona ${event.personaId} error:`, event.error);
         setActivePersona(null);
         streamingContentRef.current = '';
+        setError(`Failed to get response from ${event.personaId}: ${event.error}`);
+        pauseDebate();
+        break;
+
+      case 'batch_complete':
+        pauseDebate();
         break;
 
       case 'round_complete':
         if (event.roundFullyComplete) {
-          console.log(`🏁 Round ${event.round} COMPLETE - All 6 spoke! Moving to round ${(event.round || 1) + 1}`);
-        } else {
-          console.log(`⏳ ${event.remainingSpeakers?.length || 0} speakers remaining in round ${event.round}`);
+          pauseDebate();
         }
-        // Stances are already updated via addMessage
         break;
-        
+
+      case 'debate_limit_reached':
+        pauseDebate();
+        setError(event.message || 'Debate limit reached. Please request a verdict.');
+        break;
+
       case 'verdict_complete':
-        console.log('⚖️ Verdict delivered! Debate concluded.');
         endDebate();
         break;
-        
+
       case 'error':
-        console.error('❌ API Error:', event.error);
+        setError(event.error || 'An unexpected error occurred');
+        pauseDebate();
         break;
     }
   }, []);
 
-  const runDebateRound = useCallback(async (topicOverride?: string) => {
-    const { currentDebate } = useDebateStore.getState();
-    
-    const topic = topicOverride || currentDebate?.topic;
-    
-    if (!topic) {
-      console.error('No topic available for debate');
-      return;
-    }
+  const runDebateRound = useCallback(
+    async (topicOverride?: string) => {
+      const { currentDebate, setError, resumeDebate } = useDebateStore.getState();
 
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
+      const topic = topicOverride || currentDebate?.topic;
+      if (!topic) return;
 
-    abortControllerRef.current = new AbortController();
-
-    const freshState = useDebateStore.getState();
-    const spokenThisRound = freshState.currentDebate?.spokenThisRound || [];
-    
-    console.log('🚀 Starting debate round:', freshState.currentDebate?.round || 1);
-    console.log('📊 Already spoken this round:', spokenThisRound.join(', ') || 'none');
-
-    try {
-      const response = await fetch('/api/debate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          topic: topic,
-          messages: freshState.currentDebate?.messages || [],
-          round: freshState.currentDebate?.round || 1,
-          triggerJudge: false,
-          stances: freshState.currentDebate?.stances || {},
-          spokenThisRound: spokenThisRound,
-        }),
-        signal: abortControllerRef.current.signal,
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('API Error:', errorText);
-        throw new Error(`Failed to start debate round: ${response.status}`);
+      if (currentDebate && currentDebate.round > MAX_ROUNDS) {
+        setError(`Maximum of ${MAX_ROUNDS} rounds reached. Please request a verdict.`);
+        return;
       }
 
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error('No reader available');
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
 
-      const decoder = new TextDecoder();
-      let buffer = '';
+      abortControllerRef.current = new AbortController();
+      resumeDebate();
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      const freshState = useDebateStore.getState();
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n\n');
-        buffer = lines.pop() || '';
+      try {
+        const response = await fetch('/api/debate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            topic,
+            messages: freshState.currentDebate?.messages || [],
+            round: freshState.currentDebate?.round || 1,
+            triggerJudge: false,
+            stances: freshState.currentDebate?.stances || {},
+            spokenThisRound: freshState.currentDebate?.spokenThisRound || [],
+          }),
+          signal: abortControllerRef.current.signal,
+        });
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const event: StreamEvent = JSON.parse(line.slice(6));
-              handleStreamEvent(event);
-            } catch (e) {
-              console.error('Failed to parse event:', line, e);
-            }
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ error: response.statusText }));
+          throw new Error(errorData.error || `Failed to start debate round: ${response.status}`);
+        }
+
+        await consumeSSEStream(response, handleStreamEvent, abortControllerRef.current.signal);
+
+        // Ensure UI flips to Continue after each batch finishes
+        if (!abortControllerRef.current.signal.aborted) {
+          const { currentDebate, pauseDebate } = useDebateStore.getState();
+          if (currentDebate?.status === 'active') {
+            pauseDebate();
           }
         }
+      } catch (error) {
+        if ((error as Error).name === 'AbortError') {
+          return;
+        }
+        useDebateStore.getState().setError((error as Error).message);
+        useDebateStore.getState().pauseDebate();
       }
-    } catch (error) {
-      if ((error as Error).name === 'AbortError') {
-        console.log('Debate round aborted');
-      } else {
-        console.error('Debate round error:', error);
-      }
-    }
-  }, [handleStreamEvent]);
+    },
+    [handleStreamEvent]
+  );
 
   const triggerJudge = useCallback(async () => {
-    const { currentDebate, setStatus } = useDebateStore.getState();
-    
+    const { currentDebate, setStatus, setError } = useDebateStore.getState();
+
     if (!currentDebate || currentDebate.messages.length === 0) {
-      console.error('No debate to judge');
+      setError('No debate to judge');
       return;
     }
 
@@ -211,8 +249,6 @@ export function useDebate() {
 
     abortControllerRef.current = new AbortController();
     setStatus('judging');
-
-    console.log('⚖️ Triggering The Judge for final verdict...');
 
     try {
       const response = await fetch('/api/debate', {
@@ -229,52 +265,28 @@ export function useDebate() {
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to get verdict: ${response.status}`);
+        const errorData = await response.json().catch(() => ({ error: response.statusText }));
+        throw new Error(errorData.error || `Failed to get verdict: ${response.status}`);
       }
 
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error('No reader available');
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const event: StreamEvent = JSON.parse(line.slice(6));
-              handleStreamEvent(event);
-            } catch (e) {
-              console.error('Failed to parse event:', line, e);
-            }
-          }
-        }
-      }
+      await consumeSSEStream(response, handleStreamEvent, abortControllerRef.current.signal);
     } catch (error) {
       if ((error as Error).name === 'AbortError') {
-        console.log('Judge verdict aborted');
-      } else {
-        console.error('Judge verdict error:', error);
+        return;
       }
+      setError((error as Error).message);
+      useDebateStore.getState().pauseDebate();
     }
   }, [handleStreamEvent]);
 
-  const initiateDebate = useCallback(async (topic: string) => {
-    console.log('🎬 Initiating debate with topic:', topic);
-    
-    store.startDebate(topic);
-    
-    await new Promise(resolve => setTimeout(resolve, 150));
-    
-    runDebateRound(topic);
-  }, [store, runDebateRound]);
+  const initiateDebate = useCallback(
+    async (topic: string) => {
+      store.startDebate(topic);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      runDebateRound(topic);
+    },
+    [store, runDebateRound]
+  );
 
   const continueDebate = useCallback(() => {
     const { currentDebate } = useDebateStore.getState();
